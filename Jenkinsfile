@@ -2,7 +2,20 @@ pipeline {
     agent any
 
     stages {
+stage('Version Info') {
+    steps {
+        script {
+            def appVersion = readFile('version.txt').trim()
 
+            echo "================================"
+            echo "Application Version : ${appVersion}"
+            echo "Git Branch          : ${env.BRANCH_NAME}"
+            echo "Git Commit          : ${env.GIT_COMMIT}"
+            echo "Jenkins Build       : ${env.BUILD_NUMBER}"
+            echo "================================"
+        }
+    }
+}
         stage('Build') {
             steps {
                 echo "Building branch: ${env.BRANCH_NAME}"
