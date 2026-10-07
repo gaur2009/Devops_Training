@@ -1,24 +1,39 @@
 pipeline {
+
     agent any
 
-    stages {
-stage('Version Info') {
-    steps {
-        script {
-            def appVersion = readFile('version.txt').trim()
+    parameters {
 
-            echo "================================"
-            echo "Application Version : ${appVersion}"
-            echo "Git Branch          : ${env.BRANCH_NAME}"
-            echo "Git Commit          : ${env.GIT_COMMIT}"
-            echo "Jenkins Build       : ${env.BUILD_NUMBER}"
-            echo "================================"
-        }
+        string(
+            name: 'VERSION_NUMBER',
+            defaultValue: '1.1.0',
+            description: 'Application version to deploy'
+        )
+
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['DEV', 'STG', 'PRD'],
+            description: 'Select target deployment environment'
+        )
     }
-}
+
+    stages {
+
+        stage('Pipeline Information') {
+            steps {
+                echo "================================"
+                echo "Application Version : ${params.VERSION_NUMBER}"
+                echo "Environment         : ${params.ENVIRONMENT}"
+                echo "Git Branch          : ${env.BRANCH_NAME}"
+                echo "Git Commit          : ${env.GIT_COMMIT}"
+                echo "Jenkins Build       : ${env.BUILD_NUMBER}"
+                echo "================================"
+            }
+        }
+
         stage('Build') {
             steps {
-                echo "Building branch: ${env.BRANCH_NAME}"
+                echo "Building application..."
                 sh '''
                     mkdir -p build
                     cp index.html build/
@@ -29,7 +44,8 @@ stage('Version Info') {
 
         stage('Test') {
             steps {
-                echo "Running tests"
+                echo "Running tests..."
+
                 sh '''
                     test -f build/index.html
                     echo "Tests passed successfully"
@@ -37,22 +53,34 @@ stage('Version Info') {
             }
         }
 
-        stage('Deploy DEV') {
-            when {
-                branch 'develop'
-            }
+        stage('Deploy') {
             steps {
-                echo "Deploying DEVELOP branch to DEV"
+                script {
+
+                    if (params.ENVIRONMENT == 'DEV') {
+                        echo "Deploying version ${params.VERSION_NUMBER} to DEV"
+                    }
+
+                    else if (params.ENVIRONMENT == 'STG') {
+                        echo "Deploying version ${params.VERSION_NUMBER} to STG"
+                    }
+
+                    else if (params.ENVIRONMENT == 'PRD') {
+                        echo "Deploying version ${params.VERSION_NUMBER} to PRD"
+                    }
+                }
             }
         }
+    }
 
-        stage('Deploy PROD') {
-            when {
-                branch 'main'
-            }
-            steps {
-                echo "Deploying MAIN branch to PROD"
-            }
+    post {
+
+        success {
+            echo "Deployment completed successfully"
+        }
+
+        failure {
+            echo "Pipeline failed"
         }
     }
 }
