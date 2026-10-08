@@ -1,86 +1,116 @@
 pipeline {
-
     agent any
 
-    parameters {
-
-        string(
-            name: 'VERSION_NUMBER',
-            defaultValue: '1.1.0',
-            description: 'Application version to deploy'
-        )
-
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['DEV', 'STG', 'PRD'],
-            description: 'Select target deployment environment'
-        )
+    environment {
+        NEXUS_URL = 'http://localhost:8081'
+        NEXUS_REPO = 'jenkins-artifacts'
     }
 
     stages {
-
-        stage('Pipeline Information') {
+        stage('Version Information') {
             steps {
-                echo "================================"
-                echo "Application Version : ${params.VERSION_NUMBER}"
-                echo "Environment         : ${params.ENVIRONMENT}"
-                echo "Git Branch          : ${env.BRANCH_NAME}"
-                echo "Git Commit          : ${env.GIT_COMMIT}"
-                echo "Jenkins Build       : ${env.BUILD_NUMBER}"
-                echo "================================"
+                script {
+                    def version = readFile('version.txt').trim()
+                    def commitId = env.GIT_COMMIT.take(8)
+
+                    env.APP_VERSION = version
+                    env.RELEASE_ID = "${version}-${commitId}"
+                    env.ARTIFACT_NAME = "payment-app-${env.RELEASE_ID}.zip"
+
+                    echo "Application Version: ${env.APP_VERSION}"
+                    echo "Release ID: ${env.RELEASE_ID}"
+                    echo "Git Branch: ${env.BRANCH_NAME}"
+                    echo "Git Commit: ${env.GIT_COMMIT}"
+                    echo "Jenkins Build: ${env.BUILD_NUMBER}"
+                }
             }
         }
 
         stage('Build') {
             steps {
-                echo "Building application..."
                 sh '''
                     mkdir -p build
                     cp index.html build/
-                    echo "Build completed successfully"
+                    cp version.txt build/
                 '''
             }
         }
 
         stage('Test') {
             steps {
-                echo "Running tests..."
-
                 sh '''
-                    test -f build/index.html
-                    echo "Tests passed successfully"
+                    test -s build/index.html
+                    test -s build/version.txt
+                    echo "Tests passed"
                 '''
             }
         }
 
-        stage('Deploy') {
+        stage('Package Artifact') {
             steps {
-                script {
+                sh '''
+                    cd build
+                    zip -r "../${ARTIFACT_NAME}" .
+                    cd ..
 
-                    if (params.ENVIRONMENT == 'DEV') {
-                        echo "Deploying version ${params.VERSION_NUMBER} to DEV"
-                    }
+                    sha256sum "${ARTIFACT_NAME}" > "${ARTIFACT_NAME}.sha256"
+                    ls -lh "${ARTIFACT_NAME}"*
+                '''
+            }
+        }
 
-                    else if (params.ENVIRONMENT == 'STG') {
-                        echo "Deploying version ${params.VERSION_NUMBER} to STG"
-                    }
+        stage('Publish to Nexus') {
+            when {
+                branch 'feature-login'
+            }
 
-                    else if (params.ENVIRONMENT == 'PRD') {
-                        echo "Deploying version ${params.VERSION_NUMBER} to PRD"
-                    }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-credentials',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASS'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        set -eu
+
+                        ARTIFACT_URL="${NEXUS_URL}/repository/${NEXUS_REPO}/payment-app/${RELEASE_ID}/${ARTIFACT_NAME}"
+
+                        curl --fail --show-error \
+                             --user "${NEXUS_USER}:${NEXUS_PASS}" \
+                             --upload-file "${ARTIFACT_NAME}" \
+                             "${ARTIFACT_URL}"
+
+                        curl --fail --show-error \
+                             --user "${NEXUS_USER}:${NEXUS_PASS}" \
+                             --upload-file "${ARTIFACT_NAME}.sha256" \
+                             "${ARTIFACT_URL}.sha256"
+
+                        echo "Artifact published to Nexus successfully"
+                    '''
                 }
+            }
+        }
+
+        stage('Archive Artifact') {
+            steps {
+                archiveArtifacts(
+                    artifacts: 'payment-app-*.zip*',
+                    fingerprint: true
+                )
             }
         }
     }
 
     post {
-
         success {
-            echo "Deployment completed successfully"
+            echo 'Pipeline completed successfully'
         }
 
         failure {
-            echo "Pipeline failed"
+            echo 'Pipeline failed - check Console Output'
         }
     }
 }
